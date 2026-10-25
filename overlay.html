@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; user-select: none; font-family: 'Segoe UI', sans-serif; }
+      #frame {
+        position: absolute; inset: 0; box-sizing: border-box;
+        border: 2px dashed #3b82f6; background: rgba(59, 130, 246, 0.18); cursor: move;
+      }
+      body.locked #frame { border-color: #9ca3af; background: rgba(107, 114, 128, 0.25); cursor: not-allowed; }
+      #name {
+        position: absolute; top: 6px; left: 6px; padding: 2px 8px; border-radius: 4px;
+        background: rgba(17, 24, 39, 0.8); color: #fff; font-size: 12px; pointer-events: none;
+      }
+      [data-dir] { position: absolute; }
+      body.locked [data-dir] { display: none; }
+      [data-dir='North'] { top: 0; left: 12px; right: 12px; height: 8px; cursor: n-resize; }
+      [data-dir='South'] { bottom: 0; left: 12px; right: 12px; height: 8px; cursor: s-resize; }
+      [data-dir='West'] { left: 0; top: 12px; bottom: 12px; width: 8px; cursor: w-resize; }
+      [data-dir='East'] { right: 0; top: 12px; bottom: 12px; width: 8px; cursor: e-resize; }
+      [data-dir$='West'][data-dir^='North'], [data-dir$='East'][data-dir^='South'] { width: 14px; height: 14px; background: #3b82f6; }
+      [data-dir$='East'][data-dir^='North'], [data-dir$='West'][data-dir^='South'] { width: 14px; height: 14px; background: #3b82f6; }
+      [data-dir='NorthWest'] { top: 0; left: 0; cursor: nw-resize; }
+      [data-dir='NorthEast'] { top: 0; right: 0; cursor: ne-resize; }
+      [data-dir='SouthWest'] { bottom: 0; left: 0; cursor: sw-resize; }
+      [data-dir='SouthEast'] { bottom: 0; right: 0; cursor: se-resize; }
+    </style>
+  </head>
+  <body>
+    <div id="frame">
+      <span id="name"></span>
+      <div data-dir="North"></div>
+      <div data-dir="South"></div>
+      <div data-dir="West"></div>
+      <div data-dir="East"></div>
+      <div data-dir="NorthWest"></div>
+      <div data-dir="NorthEast"></div>
+      <div data-dir="SouthWest"></div>
+      <div data-dir="SouthEast"></div>
+    </div>
+    <script type="module" src="/src/overlay.js"></script>
+  </body>
+</html>

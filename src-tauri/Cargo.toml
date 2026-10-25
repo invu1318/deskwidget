@@ -1,0 +1,22 @@
+[package]
+name = "deskwidget"
+version = "0.1.0"
+description = "바탕화면 위젯"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "protocol-asset"] }
+tauri-plugin-autostart = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+# Tauri(wry)가 쓰는 것과 같은 버전이어야 웹뷰 객체를 그대로 다룰 수 있다.
+webview2-com = "0.39"
+windows-core = "0.62"

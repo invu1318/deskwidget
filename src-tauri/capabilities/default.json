@@ -1,0 +1,13 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "앱 내부 화면(설정창, 사진 위젯, 편집 오버레이)용 권한. 외부 웹페이지 위젯에는 적용되지 않는다.",
+  "windows": ["settings", "widget-*", "overlay-*"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-start-resize-dragging",
+    "autostart:default",
+    "dialog:default"
+  ]
+}
