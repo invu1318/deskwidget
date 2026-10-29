@@ -4,11 +4,16 @@
     <meta charset="UTF-8" />
     <style>
       html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; }
-      img { display: block; width: 100%; height: 100%; object-fit: contain; user-select: none; -webkit-user-drag: none; }
+      body { display: flex; align-items: center; justify-content: center; }
+      img, video { display: block; width: 100%; height: 100%; object-fit: contain; user-select: none; -webkit-user-drag: none; }
+      /* 동영상은 빈 여백을 검게 칠하므로 widget.js가 영상 비율에 맞춘 크기를 직접 정한다. */
+      video { flex: none; background: transparent; }
+      [hidden] { display: none; }
     </style>
   </head>
   <body>
-    <img id="img" alt="" draggable="false" />
+    <img id="img" alt="" draggable="false" hidden />
+    <video id="video" muted loop autoplay playsinline disablepictureinpicture hidden></video>
     <script type="module" src="/src/widget.js"></script>
   </body>
 </html>

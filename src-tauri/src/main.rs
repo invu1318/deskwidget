@@ -73,6 +73,7 @@ fn main() {
             widgets::add_widget,
             widgets::update_widget,
             widgets::remove_widget,
+            widgets::set_media_ratio,
             widgets::get_edit_mode,
             widgets::set_edit_mode,
         ])

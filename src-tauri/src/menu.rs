@@ -5,6 +5,7 @@ use crate::config::{Layer, WidgetKind};
 use crate::widgets;
 use tauri::menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Manager, WebviewWindow, Wry};
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
 /// 메뉴 항목 id는 `w|<위젯id>|<동작>`. 트레이 메뉴 id와 겹치지 않게 접두어를 둔다.
 const PREFIX: &str = "w|";
@@ -55,6 +56,8 @@ fn entries(app: &AppHandle, id: &str) -> Option<Vec<Entry>> {
         item("reload", "새로고침"),
         item("hide", "위젯 숨기기"),
         item("settings", "설정 열기"),
+        Entry::Separator,
+        item("delete", "위젯 삭제"),
     ]);
     Some(list)
 }
@@ -86,6 +89,18 @@ fn run(app: &AppHandle, id: &str, action: &str) -> Result<(), String> {
                 win.eval("location.reload()").map_err(|e| e.to_string())?;
             }
             return Ok(());
+        }
+        "delete" => {
+            let w = widgets::find(app, id).ok_or("위젯을 찾을 수 없습니다.")?;
+            // 메인 스레드 밖(run은 별도 작업에서 실행)이라 확인 창을 기다려도 된다.
+            let confirmed = app
+                .dialog()
+                .message(format!("'{}' 위젯을 삭제할까요?\n삭제하면 되돌릴 수 없습니다.", w.name))
+                .title("위젯 삭제")
+                .kind(MessageDialogKind::Warning)
+                .buttons(MessageDialogButtons::OkCancelCustom("삭제".into(), "취소".into()))
+                .blocking_show();
+            return if confirmed { widgets::delete(app, id) } else { Ok(()) };
         }
         _ => {}
     }

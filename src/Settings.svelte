@@ -5,7 +5,9 @@
   import { open, confirm } from '@tauri-apps/plugin-dialog';
   import { isEnabled, enable, disable } from '@tauri-apps/plugin-autostart';
 
-  const IMAGE_FILTER = [{ name: '이미지', extensions: ['gif', 'webp', 'png', 'apng', 'jpg', 'jpeg'] }];
+  const IMAGE_FILTER = [
+    { name: '사진·동영상', extensions: ['gif', 'webp', 'png', 'apng', 'jpg', 'jpeg', 'mp4', 'webm'] },
+  ];
 
   let widgets = $state([]);
   let editMode = $state(false);
@@ -97,7 +99,7 @@
   <section class="add">
     <select bind:value={kind}>
       <option value="web">웹페이지</option>
-      <option value="image">움직이는 사진</option>
+      <option value="image">움직이는 사진·동영상</option>
     </select>
     <input
       placeholder={kind === 'web' ? 'https://example.com' : '파일 경로 또는 이미지 URL'}

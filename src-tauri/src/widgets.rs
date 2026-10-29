@@ -1,5 +1,6 @@
 use crate::config::{self, Config, Layer, Widget, WidgetKind};
 use crate::desktop;
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, OnceLock};
@@ -23,6 +24,8 @@ pub struct AppState {
     pub edit_mode: Mutex<bool>,
     pub tray_edit: Mutex<Option<CheckMenuItem<Wry>>>,
     overlay_session: AtomicU32,
+    /// 동영상 위젯의 영상 비율(가로/세로). 위젯 페이지가 영상을 읽으면 알려준다.
+    media_ratio: Mutex<HashMap<String, f64>>,
 }
 
 impl AppState {
@@ -32,7 +35,29 @@ impl AppState {
             edit_mode: Mutex::new(false),
             tray_edit: Mutex::new(None),
             overlay_session: AtomicU32::new(0),
+            media_ratio: Mutex::new(HashMap::new()),
         }
+    }
+}
+
+/// 위젯 창을 편집된 영역 안에 들어가는 영상 비율 크기로 줄인다(왼쪽 위 고정).
+/// 동영상은 비율이 안 맞는 여백을 검게 칠하므로 여백 자체를 없앤다.
+fn snap_to_ratio(app: &AppHandle, id: &str) {
+    let Some(ratio) = app.state::<AppState>().media_ratio.lock().unwrap().get(id).copied() else {
+        return;
+    };
+    let mut size = None;
+    modify(app, id, |w| {
+        let (width, height) = (w.width as f64, w.height as f64);
+        if width / height > ratio {
+            w.width = (height * ratio).round().max(1.0) as u32;
+        } else {
+            w.height = (width / ratio).round().max(1.0) as u32;
+        }
+        size = Some(PhysicalSize::new(w.width, w.height));
+    });
+    if let (Some(size), Some(win)) = (size, app.get_webview_window(&widget_label(id))) {
+        let _ = win.set_size(size);
     }
 }
 
@@ -315,6 +340,10 @@ pub fn apply_edit_mode(app: &AppHandle, on: bool) -> Result<(), String> {
                 let _ = win.destroy();
             }
         }
+        let ids: Vec<String> = state.media_ratio.lock().unwrap().keys().cloned().collect();
+        for id in ids {
+            snap_to_ratio(app, &id);
+        }
         persist(app)?;
     }
     let _ = app.emit("edit-mode-changed", on);
@@ -464,10 +493,13 @@ pub async fn add_widget(app: AppHandle, kind: WidgetKind, source: String) -> Res
             .retain(|w| w.id != widget.id);
         return Err(e);
     }
+    persist(&app)?;
+    // 새 위젯은 바로 옮기고 크기를 맞출 수 있게 편집 모드로 들어간다.
     if is_edit_mode(&app) {
         open_overlay(&app, &widget)?;
+    } else {
+        apply_edit_mode(&app, true)?;
     }
-    persist(&app)?;
     Ok(widget)
 }
 
@@ -531,19 +563,40 @@ pub fn apply_update(app: &AppHandle, widget: Widget) -> Result<(), String> {
 
 #[tauri::command]
 pub fn remove_widget(app: AppHandle, id: String) -> Result<(), String> {
-    if let Some(win) = app.get_webview_window(&widget_label(&id)) {
+    delete(&app, &id)
+}
+
+pub fn delete(app: &AppHandle, id: &str) -> Result<(), String> {
+    if let Some(win) = app.get_webview_window(&widget_label(id)) {
         let _ = win.destroy();
     }
-    if let Some(overlay) = overlay_for(&app, &id) {
+    if let Some(overlay) = overlay_for(app, id) {
         let _ = overlay.destroy();
     }
-    app.state::<AppState>()
-        .config
-        .lock()
-        .unwrap()
-        .widgets
-        .retain(|w| w.id != id);
-    persist(&app)
+    let state = app.state::<AppState>();
+    state.media_ratio.lock().unwrap().remove(id);
+    state.config.lock().unwrap().widgets.retain(|w| w.id != id);
+    persist(app)?;
+    notify_changed(app);
+    Ok(())
+}
+
+/// 위젯 페이지가 동영상 비율을 알려준다(사진이면 None). 편집 중이 아니면 바로 창을 맞춘다.
+#[tauri::command]
+pub async fn set_media_ratio(app: AppHandle, id: String, ratio: Option<f64>) -> Result<(), String> {
+    {
+        let state = app.state::<AppState>();
+        let mut ratios = state.media_ratio.lock().unwrap();
+        match ratio.filter(|r| r.is_finite() && *r > 0.0) {
+            Some(r) => ratios.insert(id.clone(), r),
+            None => ratios.remove(&id),
+        };
+    }
+    if !is_edit_mode(&app) {
+        snap_to_ratio(&app, &id);
+        persist(&app)?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
