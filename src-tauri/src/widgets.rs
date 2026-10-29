@@ -36,7 +36,7 @@ impl AppState {
     }
 }
 
-fn widget_label(id: &str) -> String {
+pub fn widget_label(id: &str) -> String {
     format!("{WIDGET_PREFIX}{id}")
 }
 
@@ -48,7 +48,7 @@ fn new_id() -> String {
     format!("{nanos:x}")
 }
 
-fn find(app: &AppHandle, id: &str) -> Option<Widget> {
+pub fn find(app: &AppHandle, id: &str) -> Option<Widget> {
     let state = app.state::<AppState>();
     let config = state.config.lock().unwrap();
     config.widgets.iter().find(|w| w.id == id).cloned()
@@ -62,7 +62,7 @@ fn modify(app: &AppHandle, id: &str, f: impl FnOnce(&mut Widget)) {
     }
 }
 
-fn is_edit_mode(app: &AppHandle) -> bool {
+pub fn is_edit_mode(app: &AppHandle) -> bool {
     *app.state::<AppState>().edit_mode.lock().unwrap()
 }
 
@@ -72,7 +72,7 @@ pub fn persist(app: &AppHandle) -> Result<(), String> {
     config::save(app, &config)
 }
 
-fn notify_changed(app: &AppHandle) {
+pub fn notify_changed(app: &AppHandle) {
     let _ = app.emit("widgets-changed", ());
 }
 
@@ -180,7 +180,7 @@ static DEFAULT_USER_AGENT: OnceLock<String> = OnceLock::new();
 #[cfg(windows)]
 fn load_web(win: &WebviewWindow, mobile: bool, url: String) {
     use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Settings2;
-    use windows_core::{Interface, HSTRING, PWSTR};
+    use windows::core::{Interface, HSTRING, PWSTR};
 
     let _ = win.with_webview(move |webview| unsafe {
         let Ok(core) = webview.controller().CoreWebView2() else {
@@ -238,6 +238,7 @@ fn open_widget(app: &AppHandle, w: &Widget) -> Result<(), String> {
         .build()
         .map_err(|e| e.to_string())?;
     if w.kind == WidgetKind::Web {
+        crate::menu::attach_web_menu(&win, w.id.clone());
         load_web(&win, w.mobile, w.source.clone());
     }
     let _ = win.set_position(PhysicalPosition::new(w.x, w.y));
@@ -470,9 +471,15 @@ pub async fn add_widget(app: AppHandle, kind: WidgetKind, source: String) -> Res
     Ok(widget)
 }
 
-/// 설정창에서 바꾼 값 반영. 종류와 위치·크기는 설정창이 아닌 앱 쪽 값을 유지한다.
 #[tauri::command]
 pub async fn update_widget(app: AppHandle, widget: Widget) -> Result<(), String> {
+    apply_update(&app, widget)
+}
+
+/// 설정창·우클릭 메뉴에서 바꾼 값 반영. 종류와 위치·크기는 앱 쪽 값을 유지한다.
+/// 창을 만들 수 있으므로 메인 스레드가 아닌 곳에서 호출해야 한다.
+pub fn apply_update(app: &AppHandle, widget: Widget) -> Result<(), String> {
+    let app = app.clone();
     let old = find(&app, &widget.id).ok_or("위젯을 찾을 수 없습니다.")?;
     let source = normalize_source(old.kind, &widget.source)?;
     let new = Widget {

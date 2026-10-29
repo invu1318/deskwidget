@@ -27,6 +27,11 @@ for (const handle of document.querySelectorAll('[data-dir]')) {
   });
 }
 
+document.addEventListener('contextmenu', (event) => {
+  event.preventDefault();
+  invoke('show_widget_menu', { id });
+});
+
 listen('widget-updated', (event) => {
   if (event.payload === id) load();
 });

@@ -2,6 +2,8 @@
 
 mod config;
 mod desktop;
+mod menu;
+mod updater;
 mod widgets;
 
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
@@ -15,13 +17,14 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let edit = CheckMenuItem::with_id(app, "edit", "편집 모드", true, false, None::<&str>)?;
     let gather = MenuItem::with_id(app, "gather", "위젯을 화면 안으로 모으기", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
+    let update = MenuItem::with_id(app, "update", "업데이트 확인", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "종료", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &edit, &gather, &separator, &quit])?;
+    let menu = Menu::with_items(app, &[&open, &edit, &gather, &separator, &update, &quit])?;
     *app.state::<AppState>().tray_edit.lock().unwrap() = Some(edit);
 
     TrayIconBuilder::with_id("main")
         .icon(app.default_window_icon().cloned().expect("앱 아이콘이 없습니다"))
-        .tooltip("DeskWidget")
+        .tooltip(format!("DeskWidget {}", app.package_info().version))
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().as_ref() {
@@ -33,6 +36,7 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
                 let _ = widgets::apply_edit_mode(app, on);
             }
             "gather" => widgets::gather(app),
+            "update" => updater::check(app.clone(), true),
             "quit" => {
                 let _ = widgets::persist(app);
                 app.exit(0);
@@ -60,7 +64,10 @@ fn main() {
         }))
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .on_menu_event(|app, event| menu::on_menu_event(app, event.id().as_ref()))
         .invoke_handler(tauri::generate_handler![
+            menu::show_widget_menu,
             widgets::get_widgets,
             widgets::get_widget,
             widgets::add_widget,
@@ -85,6 +92,10 @@ fn main() {
             widgets::restore_all(&handle);
             if first_run {
                 let _ = widgets::open_settings(&handle);
+            }
+            // 개발 빌드는 정식 버전으로 덮어쓰지 않도록 시작 시 확인을 건너뛴다.
+            if !cfg!(debug_assertions) {
+                updater::check(handle.clone(), false);
             }
             Ok(())
         })

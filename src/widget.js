@@ -11,6 +11,11 @@ async function load() {
   img.src = /^https?:\/\//i.test(widget.source) ? widget.source : convertFileSrc(widget.source);
 }
 
+document.addEventListener('contextmenu', (event) => {
+  event.preventDefault();
+  invoke('show_widget_menu', { id });
+});
+
 listen('widget-updated', (event) => {
   if (event.payload === id) load();
 });
