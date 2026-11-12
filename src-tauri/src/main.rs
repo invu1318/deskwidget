@@ -87,13 +87,10 @@ fn main() {
                 config.autostart_initialized = true;
                 let _ = config::save(&handle, &config);
             }
-            let first_run = config.widgets.is_empty();
             app.manage(AppState::new(config));
             build_tray(&handle)?;
+            // 위젯이 없어도 설정창을 띄우지 않고 트레이에서만 시작한다.
             widgets::restore_all(&handle);
-            if first_run {
-                let _ = widgets::open_settings(&handle);
-            }
             // 개발 빌드는 정식 버전으로 덮어쓰지 않도록 시작 시 확인을 건너뛴다.
             if !cfg!(debug_assertions) {
                 updater::check(handle.clone(), false);
