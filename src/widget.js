@@ -2,6 +2,7 @@
 // 로컬 파일은 asset 프로토콜로, URL은 그대로 표시한다. mp4/webm은 소리 없이 반복 재생한다.
 import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { kinds, optionsOf } from './widgets/index.js';
 
 const id = new URLSearchParams(location.search).get('id');
 const $ = (name) => document.getElementById(name);
@@ -10,6 +11,7 @@ const video = $('video');
 const still = $('still');
 const clock = $('clock');
 const memo = $('memo');
+const panel = $('panel');
 const VIDEO_EXT = /\.(mp4|webm)$/i;
 const toSrc = (source) => (/^https?:\/\//i.test(source) ? source : convertFileSrc(source));
 
@@ -19,34 +21,66 @@ let slides = [];
 let slideIndex = 0;
 let slideTimer = 0;
 let clockTimer = 0;
+let unmountPanel = null;
+// 패널 위젯의 내용은 이 페이지가 주인이라, 처음 한 번만 앱에서 받아 온다.
+let panelData;
 
 function show(element) {
-  for (const each of [img, video, still, clock, memo]) each.hidden = each !== element;
+  for (const each of [img, video, still, clock, memo, panel]) each.hidden = each !== element;
+}
+
+function mountPanel(kind, widget) {
+  if (kind.css && !$(`css-${kind.kind}`)) {
+    const style = document.createElement('style');
+    style.id = `css-${kind.kind}`;
+    style.textContent = kind.css;
+    document.head.append(style);
+  }
+  if (panelData === undefined) panelData = widget.data ?? null;
+  panel.className = `k-${kind.kind}`;
+  panel.replaceChildren();
+  show(panel);
+  unmountPanel =
+    kind.mount(panel, {
+      widget,
+      options: optionsOf(widget),
+      data: panelData,
+      saveData(data) {
+        panelData = data;
+        return invoke('set_widget_data', { id, data });
+      },
+      isPaused: () => paused,
+    }) ?? null;
 }
 
 function tick() {
   const now = new Date();
-  $('time').textContent = [now.getHours(), now.getMinutes(), now.getSeconds()]
-    .map((n) => String(n).padStart(2, '0'))
-    .join(':');
+  const two = (n) => String(n).padStart(2, '0');
+  $('time').textContent = `${two(now.getHours())}:${two(now.getMinutes())}`;
+  $('sec').textContent = two(now.getSeconds());
   $('date').textContent = now.toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'long' });
 }
 
 function nextSlide() {
   if (paused || slides.length < 2) return;
   slideIndex = (slideIndex + 1) % slides.length;
-  img.src = convertFileSrc(slides[slideIndex]);
+  // 흐려진 뒤에 사진을 바꾸고, 새 사진이 준비되면 다시 나타나게 한다.
+  img.classList.add('fade');
+  setTimeout(() => (img.src = convertFileSrc(slides[slideIndex])), 450);
 }
+for (const type of ['load', 'error']) img.addEventListener(type, () => img.classList.remove('fade'));
 
 async function load() {
   const widget = await invoke('get_widget', { id });
   if (!widget) return;
   // 불투명도 같은 설정만 바뀌면 재생 중인 내용을 다시 불러오지 않는다. 메모 내용은 이 페이지가 주인이다.
-  const key = JSON.stringify([widget.kind, widget.kind === 'memo' ? '' : widget.source, widget.slideSeconds]);
+  const key = JSON.stringify([widget.kind, widget.kind === 'memo' ? '' : widget.source, widget.slideSeconds, widget.options]);
   if (key === loaded) return;
   loaded = key;
   clearInterval(slideTimer);
   clearInterval(clockTimer);
+  unmountPanel?.();
+  unmountPanel = null;
 
   const isVideo = widget.kind === 'image' && VIDEO_EXT.test(widget.source.split(/[?#]/)[0]);
   if (!isVideo) {
@@ -54,7 +88,9 @@ async function load() {
     video.load();
     invoke('set_media_ratio', { id, ratio: null });
   }
-  if (widget.kind === 'clock') {
+  if (kinds[widget.kind]) {
+    mountPanel(kinds[widget.kind], widget);
+  } else if (widget.kind === 'clock') {
     show(clock);
     tick();
     clockTimer = setInterval(tick, 1000);

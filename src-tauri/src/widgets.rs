@@ -126,7 +126,7 @@ fn page_script(w: &Widget) -> String {
 
 fn normalize_source(kind: WidgetKind, source: &str) -> Result<String, String> {
     // 시계는 소스가 없고, 메모는 내용 그대로가 소스다.
-    if matches!(kind, WidgetKind::Clock | WidgetKind::Memo) {
+    if matches!(kind, WidgetKind::Clock | WidgetKind::Memo) || kind.panel_name().is_some() {
         return Ok(source.to_string());
     }
     // 탐색기의 '경로로 복사'는 앞뒤에 따옴표를 붙인다.
@@ -150,7 +150,7 @@ fn normalize_source(kind: WidgetKind, source: &str) -> Result<String, String> {
         WidgetKind::Image => Err(format!("파일을 찾을 수 없습니다: {source}")),
         WidgetKind::Slideshow if Path::new(source).is_dir() => Ok(source.to_string()),
         WidgetKind::Slideshow => Err(format!("폴더를 찾을 수 없습니다: {source}")),
-        WidgetKind::Clock | WidgetKind::Memo => Ok(source.to_string()),
+        _ => Ok(source.to_string()),
     }
 }
 
@@ -165,6 +165,7 @@ fn default_name(kind: WidgetKind, source: &str) -> String {
             .map(str::to_string),
         WidgetKind::Clock => Some("시계".into()),
         WidgetKind::Memo => Some("메모".into()),
+        _ => kind.panel_name().map(str::to_string),
     };
     name.unwrap_or_else(|| "새 위젯".into())
 }
@@ -482,6 +483,7 @@ pub fn open_settings(app: &AppHandle) -> Result<(), String> {
     }
     WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("settings.html".into()))
         .title("위젯 설정")
+        .theme(Some(tauri::Theme::Dark))
         .inner_size(860.0, 680.0)
         .min_inner_size(600.0, 400.0)
         .center()
@@ -580,6 +582,8 @@ pub async fn add_widget(app: AppHandle, kind: WidgetKind, source: String) -> Res
         refresh_minutes: 0,
         radius: 0,
         slide_seconds: 10,
+        options: serde_json::Value::Null,
+        data: serde_json::Value::Null,
     };
     app.state::<AppState>().config.lock().unwrap().widgets.push(widget.clone());
     if let Err(e) = open_widget(&app, &widget) {
@@ -628,6 +632,8 @@ pub fn apply_update(app: &AppHandle, widget: Widget) -> Result<(), String> {
         offset_x: widget.offset_x.max(0),
         offset_y: widget.offset_y.max(0),
         slide_seconds: widget.slide_seconds.max(1),
+        // data는 위젯 화면이 주인이므로 설정창이 가진 옛 값으로 덮어쓰지 않는다.
+        data: old.data.clone(),
         ..widget
     };
     modify(&app, &new.id, |w| *w = new.clone());
@@ -723,6 +729,13 @@ pub fn set_memo_text(app: AppHandle, id: String, text: String) -> Result<(), Str
             w.source = text;
         }
     });
+    persist(&app)
+}
+
+/// 패널 위젯이 자기 내용(할 일 목록 등)을 저장한다.
+#[tauri::command]
+pub fn set_widget_data(app: AppHandle, id: String, data: serde_json::Value) -> Result<(), String> {
+    modify(&app, &id, |w| w.data = data);
     persist(&app)
 }
 

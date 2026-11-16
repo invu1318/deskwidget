@@ -2,7 +2,10 @@
 
 mod config;
 mod desktop;
+mod launcher;
+mod media_session;
 mod menu;
+mod system_stats;
 mod updater;
 mod widgets;
 
@@ -84,9 +87,14 @@ fn main() {
             widgets::remove_widget,
             widgets::set_media_ratio,
             widgets::set_memo_text,
+            widgets::set_widget_data,
             widgets::list_slides,
             widgets::get_edit_mode,
             widgets::set_edit_mode,
+            system_stats::get_system_stats,
+            launcher::open_target,
+            media_session::get_media_info,
+            media_session::media_control,
         ])
         .setup(|app| {
             let handle = app.handle().clone();

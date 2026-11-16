@@ -14,6 +14,34 @@ pub enum WidgetKind {
     Clock,
     /// source가 메모 내용이다.
     Memo,
+    // 아래는 패널 위젯: 화면은 src/widgets/kinds/<종류>.js가 그리고, 앱은 options와 data만 보관한다.
+    Calendar,
+    Dday,
+    Todo,
+    Timer,
+    WorldClock,
+    Weather,
+    System,
+    Launcher,
+    Media,
+}
+
+impl WidgetKind {
+    /// 패널 위젯이면 기본 이름을 돌려준다.
+    pub fn panel_name(self) -> Option<&'static str> {
+        Some(match self {
+            Self::Calendar => "달력",
+            Self::Dday => "디데이",
+            Self::Todo => "할 일",
+            Self::Timer => "타이머",
+            Self::WorldClock => "세계 시계",
+            Self::Weather => "날씨",
+            Self::System => "PC 상태",
+            Self::Launcher => "바로가기",
+            Self::Media => "지금 재생 중",
+            _ => return None,
+        })
+    }
 }
 
 fn default_zoom() -> f64 {
@@ -73,6 +101,12 @@ pub struct Widget {
     /// 슬라이드쇼 사진 전환 간격(초).
     #[serde(default = "default_slide_seconds")]
     pub slide_seconds: u32,
+    /// 패널 위젯: 설정창에서 고르는 값.
+    #[serde(default)]
+    pub options: serde_json::Value,
+    /// 패널 위젯: 위젯 화면이 직접 저장하는 내용(할 일 목록 등).
+    #[serde(default)]
+    pub data: serde_json::Value,
 }
 
 #[derive(Serialize, Deserialize, Default)]
