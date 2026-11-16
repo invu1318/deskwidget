@@ -7,7 +7,21 @@ use tauri::{AppHandle, Manager};
 #[serde(rename_all = "lowercase")]
 pub enum WidgetKind {
     Web,
+    /// 움직이는 사진 또는 동영상 파일 하나
     Image,
+    /// 폴더 안의 사진을 차례로 보여준다. source는 폴더 경로.
+    Slideshow,
+    Clock,
+    /// source가 메모 내용이다.
+    Memo,
+}
+
+fn default_zoom() -> f64 {
+    1.0
+}
+
+fn default_slide_seconds() -> u32 {
+    10
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Debug)]
@@ -39,6 +53,26 @@ pub struct Widget {
     /// 웹 위젯을 모바일 브라우저로 위장해 모바일 페이지를 받는다.
     #[serde(default)]
     pub mobile: bool,
+    /// 웹 위젯 확대 배율(1.0 = 100%).
+    #[serde(default = "default_zoom")]
+    pub zoom: f64,
+    /// 웹 위젯 잘라 보기: 페이지를 이 폭(페이지 px)으로 그린다. 0이면 위젯 폭.
+    #[serde(default)]
+    pub page_width: u32,
+    /// 웹 위젯 잘라 보기: 페이지의 이 지점(페이지 px)이 위젯 왼쪽 위에 오게 한다.
+    #[serde(default)]
+    pub offset_x: i32,
+    #[serde(default)]
+    pub offset_y: i32,
+    /// 웹 위젯 자동 새로고침 간격(분). 0이면 끔.
+    #[serde(default)]
+    pub refresh_minutes: u32,
+    /// 모서리 둥글기(물리 픽셀). 0이면 각진 모서리.
+    #[serde(default)]
+    pub radius: u32,
+    /// 슬라이드쇼 사진 전환 간격(초).
+    #[serde(default = "default_slide_seconds")]
+    pub slide_seconds: u32,
 }
 
 #[derive(Serialize, Deserialize, Default)]

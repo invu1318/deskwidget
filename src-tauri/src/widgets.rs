@@ -2,7 +2,7 @@ use crate::config::{self, Config, Layer, Widget, WidgetKind};
 use crate::desktop;
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::menu::CheckMenuItem;
@@ -16,8 +16,9 @@ const WIDGET_PREFIX: &str = "widget-";
 /// 오버레이 라벨은 `overlay-<편집세션>-<위젯id>`. 세션 번호로 라벨이 겹치지 않게 한다.
 const OVERLAY_PREFIX: &str = "overlay-";
 
-/// 배경을 지정하지 않은 웹페이지는 투명 창에서 비쳐 보이므로 흰 배경을 깔아준다.
-const WEB_BACKGROUND_SCRIPT: &str = "(function(){var t=function(e){if(!e)return true;var c=getComputedStyle(e).backgroundColor;return c==='transparent'||c==='rgba(0, 0, 0, 0)';};if(t(document.documentElement)&&t(document.body))document.documentElement.style.setProperty('background-color','#ffffff');})();";
+/// 배경을 지정하지 않은 웹페이지는 투명 창에서 비쳐 보이므로 브라우저 기본 배경색을 깔아준다.
+/// (Canvas는 밝은 테마면 흰색, 어두운 테마면 어두운 색이라 글자색과 어긋나지 않는다.)
+const WEB_BACKGROUND_SCRIPT: &str = "(function(){var t=function(e){if(!e)return true;var c=getComputedStyle(e).backgroundColor;return c==='transparent'||c==='rgba(0, 0, 0, 0)';};if(t(document.documentElement)&&t(document.body))document.documentElement.style.setProperty('background-color','Canvas');})();";
 
 pub struct AppState {
     pub config: Mutex<Config>,
@@ -26,6 +27,8 @@ pub struct AppState {
     overlay_session: AtomicU32,
     /// 동영상 위젯의 영상 비율(가로/세로). 위젯 페이지가 영상을 읽으면 알려준다.
     media_ratio: Mutex<HashMap<String, f64>>,
+    /// 단축키로 모든 위젯을 잠시 숨긴 상태. 저장하지 않는다.
+    hidden_all: AtomicBool,
 }
 
 impl AppState {
@@ -36,6 +39,7 @@ impl AppState {
             tray_edit: Mutex::new(None),
             overlay_session: AtomicU32::new(0),
             media_ratio: Mutex::new(HashMap::new()),
+            hidden_all: AtomicBool::new(false),
         }
     }
 }
@@ -58,6 +62,9 @@ fn snap_to_ratio(app: &AppHandle, id: &str) {
     });
     if let (Some(size), Some(win)) = (size, app.get_webview_window(&widget_label(id))) {
         let _ = win.set_size(size);
+        if let Some(w) = find(app, id) {
+            apply_shape(&win, &w);
+        }
     }
 }
 
@@ -108,11 +115,20 @@ fn page_script(w: &Widget) -> String {
     );
     if w.kind == WidgetKind::Web {
         script.push_str(WEB_BACKGROUND_SCRIPT);
+        // 자동 새로고침: 페이지가 열릴 때마다 다음 새로고침을 예약한다.
+        script.push_str(&format!(
+            "clearTimeout(window.__deskwidgetReload);if({minutes})window.__deskwidgetReload=setTimeout(function(){{location.reload();}},{minutes}*60000);",
+            minutes = w.refresh_minutes
+        ));
     }
     script
 }
 
 fn normalize_source(kind: WidgetKind, source: &str) -> Result<String, String> {
+    // 시계는 소스가 없고, 메모는 내용 그대로가 소스다.
+    if matches!(kind, WidgetKind::Clock | WidgetKind::Memo) {
+        return Ok(source.to_string());
+    }
     // 탐색기의 '경로로 복사'는 앞뒤에 따옴표를 붙인다.
     let source = source.trim().trim_matches('"').trim();
     if source.is_empty() {
@@ -132,17 +148,23 @@ fn normalize_source(kind: WidgetKind, source: &str) -> Result<String, String> {
         WidgetKind::Image if is_url => Ok(source.to_string()),
         WidgetKind::Image if Path::new(source).is_file() => Ok(source.to_string()),
         WidgetKind::Image => Err(format!("파일을 찾을 수 없습니다: {source}")),
+        WidgetKind::Slideshow if Path::new(source).is_dir() => Ok(source.to_string()),
+        WidgetKind::Slideshow => Err(format!("폴더를 찾을 수 없습니다: {source}")),
+        WidgetKind::Clock | WidgetKind::Memo => Ok(source.to_string()),
     }
 }
 
 fn default_name(kind: WidgetKind, source: &str) -> String {
     let name = match kind {
         WidgetKind::Web => Url::parse(source).ok().and_then(|u| u.host_str().map(str::to_string)),
-        WidgetKind::Image => source
+        WidgetKind::Image | WidgetKind::Slideshow => source
+            .trim_end_matches(['/', '\\'])
             .rsplit(['/', '\\'])
             .next()
             .filter(|s| !s.is_empty())
             .map(str::to_string),
+        WidgetKind::Clock => Some("시계".into()),
+        WidgetKind::Memo => Some("메모".into()),
     };
     name.unwrap_or_else(|| "새 위젯".into())
 }
@@ -193,7 +215,45 @@ fn apply_flags(win: &WebviewWindow, w: &Widget) {
         desktop::set_pinned(hwnd.0 as isize, !top);
     }
     let _ = win.eval(page_script(w));
+    apply_shape(win, w);
+    apply_view(win, w);
 }
+
+/// 모서리 둥글기 적용. 창 크기가 바뀔 때마다 다시 부른다.
+fn apply_shape(win: &WebviewWindow, w: &Widget) {
+    if let Ok(hwnd) = win.hwnd() {
+        desktop::set_radius(hwnd.0 as isize, w.width, w.height, w.radius);
+    }
+}
+
+/// 웹 위젯의 확대 배율과 잘라 보기를 적용한다. 웹뷰를 창보다 크게 잡고 왼쪽 위로 밀어서,
+/// 창에는 페이지의 원하는 부분만 보이게 한다.
+/// 창 크기가 바뀌면 웹뷰 크기가 창에 맞게 되돌아가므로 그때마다 다시 부른다.
+#[cfg(windows)]
+fn apply_view(win: &WebviewWindow, w: &Widget) {
+    use windows::Win32::Foundation::RECT;
+
+    if w.kind != WidgetKind::Web {
+        return;
+    }
+    let (Ok(size), Ok(scale)) = (win.inner_size(), win.scale_factor()) else {
+        return;
+    };
+    let zoom = w.zoom;
+    // 페이지 px → 화면 물리 픽셀
+    let px = |v: f64| (v * zoom * scale).round() as i32;
+    let (dx, dy) = (px(w.offset_x as f64), px(w.offset_y as f64));
+    let width = (size.width as i32 + dx).max(px(w.page_width as f64));
+    let bounds = RECT { left: -dx, top: -dy, right: width - dx, bottom: size.height as i32 };
+    let _ = win.with_webview(move |webview| unsafe {
+        let controller = webview.controller();
+        let _ = controller.SetZoomFactor(zoom);
+        let _ = controller.SetBounds(bounds);
+    });
+}
+
+#[cfg(not(windows))]
+fn apply_view(_win: &WebviewWindow, _w: &Widget) {}
 
 const MOBILE_USER_AGENT: &str = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36";
 
@@ -241,7 +301,7 @@ fn load_web(win: &WebviewWindow, _mobile: bool, url: String) {
 fn open_widget(app: &AppHandle, w: &Widget) -> Result<(), String> {
     let url = match w.kind {
         WidgetKind::Web => WebviewUrl::External(Url::parse("about:blank").map_err(|e| e.to_string())?),
-        WidgetKind::Image => WebviewUrl::App(format!("widget.html?id={}", w.id).into()),
+        _ => WebviewUrl::App(format!("widget.html?id={}", w.id).into()),
     };
     let id = w.id.clone();
     let win = WebviewWindowBuilder::new(app, widget_label(&w.id), url)
@@ -257,6 +317,7 @@ fn open_widget(app: &AppHandle, w: &Widget) -> Result<(), String> {
             if payload.event() == PageLoadEvent::Finished {
                 if let Some(w) = find(webview.app_handle(), &id) {
                     let _ = webview.eval(page_script(&w));
+                    apply_view(&webview, &w);
                 }
             }
         })
@@ -276,6 +337,9 @@ fn open_widget(app: &AppHandle, w: &Widget) -> Result<(), String> {
 }
 
 fn show_widget(win: &WebviewWindow, w: &Widget) {
+    if win.app_handle().state::<AppState>().hidden_all.load(Ordering::SeqCst) {
+        return;
+    }
     let _ = win.show();
     if w.layer == Layer::Desktop {
         if let Ok(hwnd) = win.hwnd() {
@@ -313,7 +377,25 @@ fn open_overlay(app: &AppHandle, w: &Widget) -> Result<(), String> {
     let _ = win.set_position(PhysicalPosition::new(w.x, w.y));
     let _ = win.set_size(PhysicalSize::new(w.width, w.height));
     let _ = win.show();
+    // 끌 때 화면 가장자리와 다른 위젯에 붙게 한다. 창을 만든 메인 스레드에서 걸어야 한다.
+    if let Ok(hwnd) = win.hwnd() {
+        let (hwnd, handle, id) = (hwnd.0 as isize, app.clone(), w.id.clone());
+        let _ = win.run_on_main_thread(move || {
+            desktop::enable_snap(hwnd, Box::new(move || other_rects(&handle, &id)));
+        });
+    }
     Ok(())
+}
+
+fn other_rects(app: &AppHandle, id: &str) -> Vec<[i32; 4]> {
+    let state = app.state::<AppState>();
+    let config = state.config.lock().unwrap();
+    config
+        .widgets
+        .iter()
+        .filter(|w| w.visible && w.id != id)
+        .map(|w| [w.x, w.y, w.x + w.width as i32, w.y + w.height as i32])
+        .collect()
 }
 
 pub fn apply_edit_mode(app: &AppHandle, on: bool) -> Result<(), String> {
@@ -437,8 +519,17 @@ pub fn on_window_event(window: &Window, event: &WindowEvent) {
         if let Some(win) = app.get_webview_window(&widget_label(id)) {
             let _ = win.set_position(pos);
             let _ = win.set_size(size);
+            if let Some(w) = find(app, id) {
+                apply_shape(&win, &w);
+            }
         }
     } else if let Some(id) = label.strip_prefix(WIDGET_PREFIX) {
+        // 창 크기가 바뀌면 웹뷰가 창 크기로 되돌아가므로 잘라 보기를 다시 적용한다.
+        if let WindowEvent::Resized(_) = event {
+            if let (Some(w), Some(win)) = (find(app, id), app.get_webview_window(label)) {
+                apply_view(&win, &w);
+            }
+        }
         // 바탕화면 고정 위젯은 클릭해서 활성화돼도 다시 맨 아래로 내린다.
         if let WindowEvent::Focused(true) = event {
             if find(app, id).is_some_and(|w| w.layer == Layer::Desktop) {
@@ -482,6 +573,13 @@ pub async fn add_widget(app: AppHandle, kind: WidgetKind, source: String) -> Res
         click_through: false,
         visible: true,
         mobile: false,
+        zoom: 1.0,
+        page_width: 0,
+        offset_x: 0,
+        offset_y: 0,
+        refresh_minutes: 0,
+        radius: 0,
+        slide_seconds: 10,
     };
     app.state::<AppState>().config.lock().unwrap().widgets.push(widget.clone());
     if let Err(e) = open_widget(&app, &widget) {
@@ -513,7 +611,11 @@ pub async fn update_widget(app: AppHandle, widget: Widget) -> Result<(), String>
 pub fn apply_update(app: &AppHandle, widget: Widget) -> Result<(), String> {
     let app = app.clone();
     let old = find(&app, &widget.id).ok_or("위젯을 찾을 수 없습니다.")?;
-    let source = normalize_source(old.kind, &widget.source)?;
+    // 메모 내용은 위젯에서만 고치므로, 설정창이 가진 옛 내용으로 덮어쓰지 않는다.
+    let source = match old.kind {
+        WidgetKind::Memo => old.source.clone(),
+        kind => normalize_source(kind, &widget.source)?,
+    };
     let new = Widget {
         kind: old.kind,
         source,
@@ -522,6 +624,10 @@ pub fn apply_update(app: &AppHandle, widget: Widget) -> Result<(), String> {
         width: old.width,
         height: old.height,
         opacity: widget.opacity.clamp(0.1, 1.0),
+        zoom: if widget.zoom.is_finite() { widget.zoom.clamp(0.25, 3.0) } else { 1.0 },
+        offset_x: widget.offset_x.max(0),
+        offset_y: widget.offset_y.max(0),
+        slide_seconds: widget.slide_seconds.max(1),
         ..widget
     };
     modify(&app, &new.id, |w| *w = new.clone());
@@ -607,4 +713,76 @@ pub fn get_edit_mode(app: AppHandle) -> bool {
 #[tauri::command]
 pub async fn set_edit_mode(app: AppHandle, on: bool) -> Result<(), String> {
     apply_edit_mode(&app, on)
+}
+
+/// 메모 위젯이 입력 내용을 저장한다.
+#[tauri::command]
+pub fn set_memo_text(app: AppHandle, id: String, text: String) -> Result<(), String> {
+    modify(&app, &id, |w| {
+        if w.kind == WidgetKind::Memo {
+            w.source = text;
+        }
+    });
+    persist(&app)
+}
+
+/// 슬라이드쇼 위젯: 폴더 안의 사진 파일 경로를 이름순으로 돌려준다.
+#[tauri::command]
+pub fn list_slides(app: AppHandle, id: String) -> Vec<String> {
+    const EXTENSIONS: [&str; 6] = ["gif", "webp", "png", "apng", "jpg", "jpeg"];
+    let Some(w) = find(&app, &id) else {
+        return Vec::new();
+    };
+    let mut files: Vec<String> = std::fs::read_dir(&w.source)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| EXTENSIONS.contains(&e.to_ascii_lowercase().as_str()))
+        })
+        .filter_map(|path| path.to_str().map(str::to_string))
+        .collect();
+    files.sort();
+    files
+}
+
+/// 단축키·트레이: 모든 위젯을 잠시 숨기거나 다시 보인다. 위젯별 '표시' 설정은 건드리지 않는다.
+pub fn toggle_hidden_all(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let hidden = !state.hidden_all.fetch_xor(true, Ordering::SeqCst);
+    let widgets = state.config.lock().unwrap().widgets.clone();
+    for w in widgets.iter().filter(|w| w.visible) {
+        if let Some(win) = app.get_webview_window(&widget_label(&w.id)) {
+            if hidden {
+                let _ = win.hide();
+            } else {
+                show_widget(&win, w);
+            }
+        }
+    }
+}
+
+/// 단축키·트레이: 클릭 통과가 켜진 위젯이 있으면 모두 끄고, 없으면 모두 켠다.
+pub fn toggle_click_through_all(app: &AppHandle) {
+    let widgets = {
+        let state = app.state::<AppState>();
+        let mut config = state.config.lock().unwrap();
+        let on = !config.widgets.iter().any(|w| w.click_through);
+        for w in config.widgets.iter_mut() {
+            w.click_through = on;
+        }
+        config.widgets.clone()
+    };
+    for w in &widgets {
+        if let Some(win) = app.get_webview_window(&widget_label(&w.id)) {
+            let _ = win.set_ignore_cursor_events(w.click_through);
+        }
+    }
+    if let Err(e) = persist(app) {
+        eprintln!("클릭 통과 설정을 저장하지 못했습니다: {e}");
+    }
+    notify_changed(app);
 }

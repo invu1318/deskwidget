@@ -5,15 +5,31 @@
     <style>
       html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; }
       body { display: flex; align-items: center; justify-content: center; }
-      img, video { display: block; width: 100%; height: 100%; object-fit: contain; user-select: none; -webkit-user-drag: none; }
+      img, video, canvas { display: block; width: 100%; height: 100%; object-fit: contain; user-select: none; -webkit-user-drag: none; }
       /* 동영상은 빈 여백을 검게 칠하므로 widget.js가 영상 비율에 맞춘 크기를 직접 정한다. */
       video { flex: none; background: transparent; }
-      [hidden] { display: none; }
+      #clock {
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        width: 100%; height: 100%; color: #fff; user-select: none;
+        font-family: 'Segoe UI', 'Malgun Gothic', sans-serif; text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+      }
+      #time { font-size: min(20vw, 55vh); font-weight: 600; line-height: 1.1; font-variant-numeric: tabular-nums; }
+      #date { font-size: min(6vw, 16vh); }
+      #memo {
+        width: 100%; height: 100%; box-sizing: border-box; padding: 12px; border: none; outline: none; resize: none;
+        background: rgba(254, 243, 199, 0.92); color: #1f2937;
+        font: 15px/1.5 'Segoe UI', 'Malgun Gothic', sans-serif;
+      }
+      [hidden] { display: none !important; }
     </style>
   </head>
   <body>
     <img id="img" alt="" draggable="false" hidden />
     <video id="video" muted loop autoplay playsinline disablepictureinpicture hidden></video>
+    <!-- 재생을 멈춘 동안 움직이는 사진 대신 보여주는 정지 장면 -->
+    <canvas id="still" hidden></canvas>
+    <div id="clock" hidden><div id="time"></div><div id="date"></div></div>
+    <textarea id="memo" placeholder="여기에 메모를 적으세요" spellcheck="false" hidden></textarea>
     <script type="module" src="/src/widget.js"></script>
   </body>
 </html>
